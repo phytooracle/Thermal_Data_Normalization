@@ -6,7 +6,7 @@ COPY . /opt
 USER root
 
 RUN apt-get update
-RUN apt-get install -y python3.8.5-dev \
+RUN apt-get install -y python3.8-dev \
                        python3-pip \
                        wget \
                        gdal-bin \
