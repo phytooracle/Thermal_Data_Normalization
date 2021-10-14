@@ -218,12 +218,13 @@ def md_shp():
 def Env_data():
     # Env logger data
     args = get_args()    
+    print('Downloading Environement Logger tarfile')
     #command = f'iget -rKTPf -N 0 /iplant/home/shared/phytooracle/{args.season}/level_1/EnvironmentLogger/{args.date}_clean.tar.gz'
     command = f'wget https://data.cyverse.org/dav-anon/iplant/projects/phytooracle/{args.season}/level_1/EnvironmentLogger/{args.date}_clean.tar.gz'
     subprocess.call(command, shell = True)
     command = f'tar -xvf {args.date}_clean.tar.gz'
     subprocess.call(command, shell = True)
-
+    print('Environment Logger data has been downloaded and uncompressed')
     # Retrieve csv data and organize/clean up
     EnvL_data = pd.read_csv(f'./{args.date}_clean.csv')
     EnvL_data['Time'] = pd.to_datetime(EnvL_data['Time'])
