@@ -224,7 +224,7 @@ def Env_data():
     subprocess.call(command, shell = True)
 
     # Retrieve csv data and organize/clean up
-    EnvL_data = pd.read_csv(f'./{args.date}_clean.csv')
+    EnvL_data = pd.read_csv(f'{args.date}_clean.csv')
     EnvL_data['Time'] = pd.to_datetime(EnvL_data['Time'])
     Envlog_clean = EnvL_data[['Time', 'Sun Direction', 'Temperature', 'Photosynthetically active radiation', 'Wind velocity']]
     return Envlog_clean
