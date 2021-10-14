@@ -227,6 +227,7 @@ def Env_data():
     EnvL_data = pd.read_csv(f'{args.date}_clean.csv')
     EnvL_data['Time'] = pd.to_datetime(EnvL_data['Time'])
     Envlog_clean = EnvL_data[['Time', 'Sun Direction', 'Temperature', 'Photosynthetically active radiation', 'Wind velocity']]
+    #print("Env Data Retrieved")
     return Envlog_clean
 
 #----------------------------------
