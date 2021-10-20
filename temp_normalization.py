@@ -288,15 +288,17 @@ def azmet_dict(JSON_df):
     cnt = 0
     for i, row in JSON_df.iterrows():
         cnt += 1
-        time = row['time'].round('H')
-        result_index = time.hour
+        result_index = date_of_interest['date'].sub(time).abs().idxmin()
+        result_index_env = EnvLog['Time'].sub(time).abs().idxmin()
+#         time = row['time'].round('H')
+#         result_index = time.hour
         AZmet_temp = date_of_interest['Air Temperature'].iloc[result_index]
         AZmet_wind = date_of_interest['Avg Wind Speed'].iloc[result_index]
         AZmet_vpd = date_of_interest['VPD'].iloc[result_index]
         AZmet_solar = date_of_interest['Solar Radiation'].iloc[result_index]
         AZmet_rh = date_of_interest['Relative Humidity'].iloc[result_index]
-        Env_temp = EnvLog['Temperature'].iloc[result_index]
-        Env_wind = EnvLog['Wind velocity'].iloc[result_index]
+        Env_temp = EnvLog['Temperature'].iloc[result_index_env]
+        Env_wind = EnvLog['Wind velocity'].iloc[result_index_env]
         AZmet_dict[cnt] = {'azmet_atm_temp': AZmet_temp, 'azmet_wind_velocity': AZmet_wind, 'azmet_VPD': AZmet_vpd, 'azmet_solar_radiation':
                           AZmet_solar, 'relative_humidity': AZmet_rh, 'env_temp': Env_temp, 'env_wind': Env_wind}
     return pd.DataFrame.from_dict(AZmet_dict)
