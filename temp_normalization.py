@@ -288,6 +288,7 @@ def azmet_dict(JSON_df):
     cnt = 0
     for i, row in JSON_df.iterrows():
         cnt += 1
+        time = row['time']
         result_index = date_of_interest['date'].sub(time).abs().idxmin()
         result_index_env = EnvLog['Time'].sub(time).abs().idxmin()
 #         time = row['time'].round('H')
