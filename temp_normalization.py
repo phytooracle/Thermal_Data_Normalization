@@ -20,8 +20,8 @@ import sklearn
 from sklearn.linear_model import LinearRegression  # to build a LR model for comparison
 #import plotly.graph_objects as go  # for data visualization
 #import plotly.express as px  # for data visualization
-import statsmodel
-import statsmodels.api as sm  # to build a LOWESS model
+#import statsmodel
+#import statsmodels.api as sm  # to build a LOWESS model
 from scipy.interpolate import interp1d  # for interpolation of new data points
 import scipy
 from scipy.optimize import curve_fit
