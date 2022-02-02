@@ -16,6 +16,7 @@ import numpy as np
 import urllib
 import argparse
 import utm
+import sklearn
 from sklearn.linear_model import LinearRegression  # to build a LR model for comparison
 import plotly.graph_objects as go  # for data visualization
 import plotly.express as px  # for data visualization
