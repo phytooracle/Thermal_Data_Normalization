@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
 
-import geopandas as gpd
-from shapely.geometry import Polygon, Point
-from geopandas.geoseries import *
-import tarfile
 import pandas as pd
-import datetime as dt
-import os
-import glob
-import subprocess
-import os.path
-import json
-from pathlib import Path
+import datetime
+from datetime import timedelta
 import numpy as np
-import urllib
-import argparse
-import utm
-import sklearn
-from sklearn.linear_model import LinearRegression  # to build a LR model for comparison
-from scipy.interpolate import interp1d  # for interpolation of new data points
 import scipy
 from scipy.optimize import curve_fit
 from itertools import cycle
 from datetime import datetime
+from datetime import timedelta
 from scipy.interpolate import UnivariateSpline
+import subprocess
+from shapely.geometry import Polygon, Point, mapping
+import shapely.wkt
+import geopandas as gpd
+from pyproj import Proj
+import glob
+import utm
+import json
+import argparse
+import os
+import glob
+
 
 # ----------------------------------
-
 
 def get_args():
     """Get command-line arguments"""
@@ -80,7 +77,7 @@ def get_args():
     parser.add_argument(
         "-c",
         "--csv",
-        help=' "Individual Plant Temp CSV" ',
+        help=' "Individual Plant Temp detections CSV" ',
         metavar="csv",
         type=str,
         default=None,
@@ -91,16 +88,13 @@ def get_args():
 
 
 # ----------------------------------
-# UTM Functions
+
 def utm_to_latlon(utm_x, utm_y):
-    """Convert coordinates from UTM 12N to lat/lon"""
+    p = Proj(proj='utm',zone=12,ellps='WGS84')
+    lon, lat = p(utm_x, utm_y, inverse=True)
+    return lat, lon
 
-    # Get UTM information from southeast corner of field
-    SE_utm = utm.from_latlon(33.07451869, -111.97477775)
-    utm_zone = SE_utm[2]
-    utm_num = SE_utm[3]
-    return utm.to_latlon(utm_x, utm_y, utm_zone, utm_num)
-
+# ----------------------------------
 
 def scanalyzer_to_utm(gantry_x, gantry_y):
     """Convert coordinates from gantry to UTM 12N"""
@@ -119,16 +113,15 @@ def scanalyzer_to_utm(gantry_x, gantry_y):
 
     return utm_x, utm_y
 
+# ----------------------------------
 
 def scanalyzer_to_latlon(gantry_x, gantry_y):
     """Convert coordinates from gantry to lat/lon"""
     utm_x, utm_y = scanalyzer_to_utm(gantry_x, gantry_y)
     return utm_to_latlon(utm_x, utm_y)
 
-
 # ----------------------------------
-# Gathers gantry x, y, z, coordinates as well as time
-# Converts coordinates to lat lon
+
 def md_shp():
 
     args = get_args()
@@ -217,7 +210,6 @@ def md_shp():
         columns=["time", "filename", "gantry_x", "gantry_y", "gantry_z", "b_box"],
     )
 
-    # Converts gantry/scanners location to lat lon
     GPS_latlon = scanalyzer_to_latlon(JSON_df["gantry_x"], JSON_df["gantry_y"])
     GPS_latlon_df = pd.DataFrame(GPS_latlon).transpose()
     GPS_latlon_df.columns = ["GPS_lon", "GPS_lat"]
@@ -239,6 +231,7 @@ def md_shp():
 
     JSON_df["bbox_geometry"] = polygon_list
 
+    
     JSON_df["time"] = pd.to_datetime(JSON_df.time)
     JSON_df = JSON_df.sort_values(by="time")
 
@@ -265,19 +258,92 @@ def md_shp():
 
 # ----------------------------------
 
+def AZmet(date):
+    year = date[2:4]
 
-def Env_data():
+    AZmet_data = pd.read_csv(
+        f"https://cals.arizona.edu/azmet/data/06{year}rh.txt",
+        names=[
+            "Year",
+            "Day",
+            "Hour",
+            "Air Temperature",
+            "Relative Humidity",
+            "VPD",
+            "Solar Radiation",
+            "Precipitation",
+            "4 inch Soil T",
+            "12 inch Soil T",
+            "Avg Wind Speed",
+            "Wind Vector Magnitude",
+            "Wind Vector Direction",
+            "Wind Direction STDEV",
+            "Max Wind Speed",
+            "Reference Evapotranspiration",
+            "Actual Vapor Pressure",
+            "Dewpoint",
+        ],
+    )
+    print("Document downloaded, loaded")
+    AZmet_df = pd.DataFrame(AZmet_data)
+
+    AZmet_df["combined"] = AZmet_df["Year"] * 1000 + AZmet_df["Day"]
+    AZmet_df["date"] = pd.to_datetime(AZmet_df["combined"], format="%Y%j")
+    AZmet_df = AZmet_df.set_index("date")
+    
+    del AZmet_df["combined"]
+    
+    return AZmet_df
+
+# ----------------------------------
+
+def find_date(AZmet_df, date):
+
+    previous_day = str((pd.to_datetime(date) - timedelta(days=1)).date())
+    next_day = str((pd.to_datetime(date) + timedelta(days=1)).date())
+
+    yesterday = AZmet_df[AZmet_df.index == previous_day]
+    today = AZmet_df[AZmet_df.index == date]
+    tomorrow = AZmet_df[AZmet_df.index == next_day]
+
+    concat = pd.concat([yesterday, today]).reset_index()
+    concat_all = pd.concat([concat, tomorrow.reset_index()]).reset_index()
+
+    Hour_0_index = concat[concat["date"] == date].index[0] - 1
+    Hour_25_index = concat[concat["date"] == date].index[-1] + 1
+
+    Hour_0 = pd.DataFrame(concat.iloc[Hour_0_index]).transpose()
+    Hour_25 = pd.DataFrame(concat_all.iloc[Hour_25_index]).transpose()
+
+    date_of_interest_pre = pd.concat([Hour_0, today.reset_index()])
+    date_of_interest = pd.concat([date_of_interest_pre, Hour_25])
+
+    date_of_interest = date_of_interest.reset_index()
+    del date_of_interest["index"]
+    del date_of_interest["level_0"]
+
+    date_of_interest["date"][0] = date
+    date_of_interest["Hour"][0] = 0
+
+    date_of_interest["date"][25] = date
+    date_of_interest["Hour"][25] = 25
+
+    return date_of_interest
+
+# ----------------------------------
+
+def Env_data(date):
     # Env logger data
     args = get_args()
     print("Downloading Environement Logger tarfile")
     # command = f'iget -rKTPf -N 0 /iplant/home/shared/phytooracle/{args.season}/level_1/EnvironmentLogger/{args.date}_clean.tar.gz'
-    command = f"wget https://data.cyverse.org/dav-anon/iplant/projects/phytooracle/{args.season}/level_1/EnvironmentLogger/{args.date}_clean.tar.gz"
+    command = f"wget https://data.cyverse.org/dav-anon/iplant/projects/phytooracle/{args.season}/level_1/EnvironmentLogger/{date}_clean.tar.gz"
     subprocess.call(command, shell=True)
-    command = f"tar -xvf {args.date}_clean.tar.gz"
+    command = f"tar -xvf {date}_clean.tar.gz"
     subprocess.call(command, shell=True)
     print("Environment Logger data has been downloaded and uncompressed")
     # Retrieve csv data and organize/clean up
-    EnvL_data = pd.read_csv(f"./{args.date}_clean.csv")
+    EnvL_data = pd.read_csv(f"./{date}_clean.csv")
     EnvL_data["Time"] = pd.to_datetime(EnvL_data["Time"])
     Envlog_clean = EnvL_data[
         [
@@ -291,8 +357,8 @@ def Env_data():
     # print("Env Data Retrieved")
     return Envlog_clean
 
-
 # ----------------------------------
+
 def splines(
     df, xvar, yvar
 ):  # xdata would be the information you want to use ex: df['Hour']
@@ -300,6 +366,7 @@ def splines(
     ydata = df[yvar]
     x, y = xdata.values, ydata.values
     spl = UnivariateSpline(x, y)
+    # spl.set_smoothing_factor(50)
 
     xrange = np.arange(0, 24, 0.01667)
 
@@ -327,74 +394,84 @@ def splines(
     finer_df["date"] = finer_df["date"] + finer_df["Hour"] + finer_df["Minute"]
     return finer_df
 
-
 # ----------------------------------
-def AZMget(JSON_df):
 
-    args = get_args()
-    season = args.season
-    date = args.date
-
-    year = date[2:4]
-
-    AZmet_data = pd.read_csv(
-        f"https://cals.arizona.edu/azmet/data/06{year}rh.txt",
-        names=[
-            "Year",
-            "Day",
-            "Hour",
-            "Air Temperature",
-            "Relative Humidity",
-            "VPD",
-            "Solar Radiation",
-            "Precipitation",
-            "4 inch Soil T",
-            "12 inch Soil T",
-            "Avg Wind Speed",
-            "Wind Vector Magnitude",
-            "Wind Vector Direction",
-            "Wind Direction STDEV",
-            "Max Wind Speed",
-            "Reference Evapotranspiration",
-            "Actual Vapor Pressure",
-            "Dewpoint",
-        ],
-    )
-    print("Document downloaded, loaded")
-
-    AZmet_df = pd.DataFrame(AZmet_data)
-
-    AZmet_df["combined"] = AZmet_df["Year"] * 1000 + AZmet_df["Day"]
-    AZmet_df["date"] = pd.to_datetime(AZmet_df["combined"], format="%Y%j")
-    AZmet_df = AZmet_df.set_index("date")
-
-    del AZmet_df["combined"]
-
-    date_of_interest = AZmet_df[AZmet_df.index == date]
-    date_of_interest = date_of_interest.reset_index()
-
-    # date_of_interest['Hour'] = pd.to_timedelta(date_of_interest['Hour'], unit = 'h')
-    # date_of_interest['date'] = date_of_interest['date'] + date_of_interest['Hour']
-    # date_of_interest = date_of_interest.set_index('date')
-    # date_of_interest = date_of_interest.reset_index()
-
-    temp_df = splines(date_of_interest, "Hour", "Air Temperature")
-    temp_df["VPD"] = splines(date_of_interest, "Hour", "VPD")["VPD"]
-    temp_df["Relative Humidity"] = splines(
-        date_of_interest, "Hour", "Relative Humidity"
-    )["Relative Humidity"]
-    temp_df["Avg Wind Speed"] = splines(date_of_interest, "Hour", "Avg Wind Speed")[
-        "Avg Wind Speed"
+def retrieve_splines(df):
+    temp_df = splines(df, "Hour", "Air Temperature")
+    temp_df["VPD"] = splines(df, "Hour", "VPD")["VPD"]
+    temp_df["Relative Humidity"] = splines(df, "Hour", "Relative Humidity")[
+        "Relative Humidity"
     ]
-    temp_df["Solar Radiation"] = splines(date_of_interest, "Hour", "Solar Radiation")[
+    temp_df["Avg Wind Speed"] = splines(df, "Hour", "Avg Wind Speed")["Avg Wind Speed"]
+    temp_df["Solar Radiation"] = splines(df, "Hour", "Solar Radiation")[
         "Solar Radiation"
     ]
+    return temp_df
+
+# ----------------------------------
+
+def AZMget(JSON_df):
+    # ----------------
+    args = get_args()
+
+    season = args.season
+
+    date = args.date
+    # ----------------
+
+    # Finds unique dates
+    date_list = []
+    JSON_df['time'] = pd.to_datetime(JSON_df['time'])
+    dates = JSON_df["time"].dt.date.unique()
+    for date in dates:
+        date_list.append(date)
+
+    if len(date_list) > 1:
+        date1 = str(date_list[0])
+        date2 = str(date_list[1])
+
+        AZmet_date1 = AZmet(date1)
+        AZmet_date2 = AZmet(date2)
+
+        if AZmet_date1.equals(AZmet_date2) == False:
+            AZmet_df = AZmet_date1
+            AZmet_df = pd.concat([AZmet_date1, AZmet_date2])
+        else:
+            AZmet_df = AZmet_date1
+
+        date_of_interest1 = find_date(AZmet_df, date1)
+        date_of_interest2 = find_date(AZmet_df, date2)
+
+        env_date1 = Env_data(date1)
+        env_date2 = Env_data(date2)
+
+        temp_df1 = retrieve_splines(date_of_interest1)
+        temp_df2 = retrieve_splines(date_of_interest2)
+
+        temp_df = pd.concat([temp_df1, temp_df2])
+
+        EnvLog = pd.concat([env_date1, env_date2])
+
+    else:
+        date1 = str(date_list[0])
+        AZmet_df = AZmet(date1)
+
+        date_of_interest = find_date(AZmet_df, date1)
+
+        EnvLog = Env_data(date1)
+
+        temp_df = retrieve_splines(date_of_interest)
 
     temp_df["Hour"] = temp_df["date"].dt.hour
     temp_df["Minute"] = temp_df["date"].dt.minute
 
+    EnvLog = EnvLog.set_index("Time")
+    EnvLog = EnvLog.reset_index() 
+
     date_of_interest = temp_df
     print("* * AZmet Date of Interest Gathered * *")
+
+    print("* * Environment Logger Date of Interest Gathered * *")
 
     # image_file = JSON_df
     JSON_df["time"] = pd.to_datetime(JSON_df["time"])
@@ -402,19 +479,13 @@ def AZMget(JSON_df):
 
     print("* * JSON_df Formatted * *")
 
-    EnvLog = Env_data()
-    EnvLog = EnvLog.set_index("Time")
-    EnvLog = EnvLog.reset_index()
-
-    print("* * Environment Logger Date of Interest Gathered * *")
-
-    return JSON_df, EnvLog, date_of_interest
-
+    return JSON_df, date_of_interest, EnvLog
 
 # ----------------------------------
+
 def azmet_dict(JSON_df):
     AZmet_dict = {}
-    JSON_df, EnvLog, date_of_interest = AZMget(JSON_df)
+    JSON_df, date_of_interest, EnvLog = AZMget(JSON_df)
     cnt = 0
     for i, row in JSON_df.iterrows():
         cnt += 1
@@ -446,9 +517,7 @@ def azmet_dict(JSON_df):
         }
     return pd.DataFrame.from_dict(AZmet_dict)
 
-
 # ----------------------------------
-
 
 def compile_info(JSON_df, environmental_df):
     JSON_df["azmet_atm_temp"] = environmental_df["azmet_atm_temp"]
@@ -460,23 +529,20 @@ def compile_info(JSON_df, environmental_df):
     JSON_df["env_wind"] = environmental_df["env_wind"]
     return JSON_df
 
-
 # ----------------------------------
-
 
 def listToStringWithoutBrackets(list1):
     return str(list1).replace("[", "").replace("]", "")
 
-
 # ----------------------------------
 
-# Takes each image (with multiple plots per row) and breaks it up so you have all of the plots listed out with associated data
 def expand_plots(clean_file):
     file = clean_file
     file["plot"] = (file["plot"].apply(listToStringWithoutBrackets)).apply(eval)
     plot_expand = file["plot"].apply(pd.Series)
     plot_expand["time"] = file["time"]
     plot_expand["Image Name"] = file["filename"]
+    plot_expand["bbox_geometry"] = file["bbox_geometry"]
     plot_expand["env_temp"] = file["env_temp"]
     plot_expand["env_wind"] = file["env_wind"]
     plot_expand["azmet_atm_temp"] = file["azmet_atm_temp"]
@@ -488,6 +554,7 @@ def expand_plots(clean_file):
         [
             "time",
             "Image Name",
+            "bbox_geometry",
             "env_temp",
             "env_wind",
             "azmet_atm_temp",
@@ -498,183 +565,121 @@ def expand_plots(clean_file):
         ]
     ).stack()
     stack_df = pd.DataFrame(stacked).reset_index()
-    del stack_df["level_9"]
+    del stack_df["level_10"]
     final_df = stack_df.rename(columns={0: "Plot"})
     return final_df
 
+# ----------------------------------
 
-# Takes a plot as paramter and finds how long it took to image that plot
-def plot_scan_time(interest_plot):
-    final_df = expand_plots(file)
-    plot_duration = final_df.loc[final_df["Plot"] == interest_plot]
-    start = pd.to_datetime(plot_duration["time"].iloc[(0)])
-    end = pd.to_datetime(plot_duration["time"].iloc[(-1)])
-    return end - start
+def get_point(df):
+    df['Point'] = None
+    for i, row in df.iterrows():
+        lon = row['lon']
+        lat = row['lat']
+        point = Point(lon, lat)
 
-
-# Takes a plot as parameter and finds how much the temperature changed during the time it took to image the plot
-def plot_temp_change(interest_plot):
-    final_df = expand_plots(file)
-    plot_duration = final_df.loc[final_df["Plot"] == interest_plot]
-    start = plot_duration["env_temp"].iloc[(0)]
-    end = plot_duration["env_temp"].iloc[(-1)]
-    return end - start
-
-
-# Expands plots so each plot is represented
-def images_making_plot(interest_plot):
-    final_df = expand_plots(file)
-    plot_list = final_df.loc[final_df["Plot"] == interest_plot]
-    return plot_list
-
+        df.at[i, 'Point'] = point
+    return df
 
 # ----------------------------------
 
+## Results in a dictionary that finds which image a particular point has been imaged in
+def find_images(polygon_df, point):
+    intersection_dict = {}
+    cnt = 0
+    for i, row in polygon_df.iterrows():
+        cnt += 1
+        # polygon = shapely.wkt.loads(row['bbox_geometry'])
+        polygon = row['bbox_geometry']
+        intersection = point.intersects(polygon)
+        if intersection == True:
+            time = row['time']
+            plot = row['plot']
+            image = row["filename"]
+            azmet_temp = row['azmet_atm_temp']
+            azmet_wind = row['azmet_wind_velocity']
+            azmet_VPD = row['azmet_VPD']
+            azmet_solar_radiation = row['azmet_solar_radiation']
+            relative_humidity = row['relative_humidity']
+            env_temp = row['env_temp']
+            env_wind = row['env_wind']
+            intersection_dict[cnt] = {
+                "Date and Time": time,
+                "image": image,
+                "plot": plot,
+                "polygon": polygon,
+                "azmet_atm_temp": azmet_temp,
+                "azmet_wind_velocity": azmet_wind,
+                "azmet_VPD": azmet_VPD,
+                "azmet_solar_radiation": azmet_solar_radiation,
+                "azmet_relative_humidity": relative_humidity,
+                "env_temp": env_temp,
+                "env_wind": env_wind
+            }
+        dict_df = pd.DataFrame.from_dict(intersection_dict).T
+
+    return dict_df
+
+# ----------------------------------
 
 def main():
+    # --------------
     args = get_args()
     season = args.season
+    # --------------
 
     JSON_df = md_shp()
 
     environmental_df = azmet_dict(JSON_df).transpose()
+
     file = compile_info(JSON_df, environmental_df)
-    finale_df = expand_plots(file)
-    env_logger = JSON_df[
-        [
-            "time",
-            "filename",
-            "azmet_atm_temp",
-            "azmet_wind_velocity",
-            "azmet_VPD",
-            "azmet_solar_radiation",
-            "relative_humidity",
-            "env_temp",
-            "env_wind",
-        ]
-    ].set_index("filename")
 
-    print("Im through!")
-
-    img_plot = finale_df[["Image Name", "Plot"]]
-    img_plot.columns = ["image", "plot"]
-    ######
-
-    img_plot["Date and Time"] = img_plot["azmet_atm_temp"] = img_plot[
-        "azmet_wind_velocity"
-    ] = img_plot["azmet_VPD"] = img_plot["azmet_solar_radiation"] = img_plot[
-        "relative_humidity"
-    ] = img_plot[
-        "env_temp"
-    ] = img_plot[
-        "env_wind"
-    ] = None
-
-    for i, row in img_plot.iterrows():
-        meta = row["image"]
-        try:
-            datetime = env_logger.loc[meta, "time"]
-            azmet_temp = env_logger.loc[meta, "azmet_atm_temp"]
-            azmet_wind_vel = env_logger.loc[meta, "azmet_wind_velocity"]
-            azmet_vpd = env_logger.loc[meta, "azmet_VPD"]
-            sol_rad = env_logger.loc[meta, "azmet_solar_radiation"]
-            temp = env_logger.loc[meta, "env_temp"]
-            win_vel = env_logger.loc[meta, "env_wind"]
-            rel_hum = env_logger.loc[meta, "relative_humidity"]
-
-            img_plot.at[i, "Date and Time"] = datetime
-            img_plot.at[i, "azmet_atm_temp"] = azmet_temp
-            img_plot.at[i, "azmet_wind_velocity"] = azmet_wind_vel
-            img_plot.at[i, "azmet_VPD"] = azmet_vpd
-            img_plot.at[i, "azmet_solar_radiation"] = sol_rad
-            img_plot.at[i, "env_temp"] = temp
-            img_plot.at[i, "env_wind"] = win_vel
-            img_plot.at[i, "relative_humidity"] = rel_hum
-
-        except:
-            pass
-
-    df_agg = img_plot.drop(
-        ["image", "Date and Time"], axis=1
-    )  # .set_index('plot')#.groupby('plot')
-
-    temp_dict = {}
-    cnt = 0
-
-    for plot in df_agg["plot"].unique().tolist():
-        try:
-            cnt += 1
-
-            select_df = df_agg.set_index("plot").loc[plot]
-            temp_median = select_df["azmet_atm_temp"].median()
-            temp_mean = select_df["azmet_atm_temp"].mean()
-            temp_std = select_df["azmet_atm_temp"].std()
-
-            azmet_wind_vel = select_df["azmet_wind_velocity"].median()
-            azmet_vpd = select_df["azmet_VPD"].median()
-            sol_rad = select_df["azmet_solar_radiation"].median()
-            temp = select_df["env_temp"].median()
-            wind_vel = select_df["env_wind"].median()
-            rel_hum = select_df["relative_humidity"].median()
-
-            temp_dict[cnt] = {
-                "plot": plot,
-                "median": temp_median,
-                "mean": temp_mean,
-                "std_dev": temp_std,
-                "azmet_wind_velocity": azmet_wind_vel,
-                "azmet_VPD": azmet_vpd,
-                "azmet_solar_radiation": sol_rad,
-                "env_temp": temp,
-                "env_wind": wind_vel,
-                "relative_humidity": rel_hum,
-            }
-        except:
-            pass
-
-    result = pd.DataFrame.from_dict(temp_dict, orient="index").set_index("plot")
-
+    # --------------
     # Reads in csv file of individual plant temperatures
     plant_detections = pd.read_csv(args.csv)
 
-    # Adds the field information and PCT values to the already existing csv that is indexed by plot
-    plant_detections["norm_temp"] = plant_detections["atm_temp"] = None
+    plant_detections = get_point(plant_detections)
+    # --------------
 
+
+    plant_detections['azmet_atm_temp'] = plant_detections['azmet_wind_velocity'] = plant_detections['azmet_VPD'] = plant_detections['env_temp'] = plant_detections['env_wind'] = None
     for i, row in plant_detections.iterrows():
-
+        
         try:
-            plot = row["plot"].replace("_", " ")
-            plant_temp = row["median"]
+            point = row['Point']
+            dict_df = find_images(file, point)
 
-            temp_df = result.loc[plot]
-            atm_temp = temp_df["median"]
-            norm_temp = atm_temp - plant_temp
+            temp_mean = dict_df['azmet_atm_temp'].mean()
+            wind_mean = dict_df['azmet_wind_velocity'].mean()
+            VPD_mean = dict_df['azmet_VPD'].mean()
+            solar_mean = dict_df['azmet_solar_radiation'].mean()
+            rh_mean = dict_df['azmet_relative_humidity'].mean()
+            env_temp_mean = dict_df['env_temp'].mean()
+            env_wind_mean = dict_df['env_wind'].mean()
 
-            azmet_wind_vel = temp_df["azmet_wind_velocity"]
-            azmet_vpd = temp_df["azmet_VPD"]
-            sol_rad = temp_df["azmet_solar_radiation"]
-            temp = temp_df["env_temp"]
-            wind_vel = temp_df["env_wind"]
-            rel_hum = temp_df["relative_humidity"]
+            plant_detections.at[i, "azmet_atm_temp"] = temp_mean
+            plant_detections.at[i, "azmet_wind_velocity"] = wind_mean
+            plant_detections.at[i, "azmet_VPD"] = VPD_mean
+            plant_detections.at[i, "azmet_solar_radiation"] = solar_mean
+            plant_detections.at[i, "azmet_relative_humidity"] = rh_mean
+            plant_detections.at[i, "env_temp"] = env_temp_mean
+            plant_detections.at[i, "env_wind"] = env_wind_mean
 
-            plant_detections.at[i, "norm_temp"] = norm_temp
-            plant_detections.at[i, "atm_temp"] = atm_temp
-
-            plant_detections.at[i, "azmet_wind_velocity"] = azmet_wind_vel
-            plant_detections.at[i, "azmet_VPD"] = azmet_vpd
-            plant_detections.at[i, "azmet_solar_radiation"] = sol_rad
-            plant_detections.at[i, "env_temp"] = temp
-            plant_detections.at[i, "env_wind"] = wind_vel
-            plant_detections.at[i, "relative_humidity"] = rel_hum
         except:
             pass
 
-    plant_detections.to_csv(
-        os.path.join(args.outdir, f"{args.date}_indiv_atm_temp.csv")
-    )
-    print(f"Done, see outputs in ./{args.outdir}.")
+    
+    out_dir = args.outdir
 
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+    
+    plant_detections.to_csv(
+        os.path.join(out_dir, f"{args.date}_indiv_atm_temp.csv")
+    )
+    print(f"Done, see outputs in ./{out_dir}.")
 
 # ----------------------------------
+
 if __name__ == "__main__":
     main()
