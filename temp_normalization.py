@@ -416,7 +416,7 @@ def AZMget(JSON_df):
 
     season = args.season
 
-    date = args.date
+#     date = args.date
     # ----------------
 
     # Finds unique dates
