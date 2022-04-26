@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 from itertools import cycle
 from datetime import datetime
 from datetime import timedelta
-from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import UnivariateSpline, CubicSpline
 import subprocess
 from shapely.geometry import Polygon, Point, mapping
 import shapely.wkt
@@ -365,8 +365,9 @@ def splines(
     xdata = df[xvar]
     ydata = df[yvar]
     x, y = xdata.values, ydata.values
-    spl = UnivariateSpline(x, y)
+    # spl = UnivariateSpline(x, y)
     # spl.set_smoothing_factor(50)
+    spl = CubicSpline(x, y)
 
     xrange = np.arange(0, 24, 0.01667)
 
