@@ -5,6 +5,6 @@ numpy==1.19.5
 utm==0.7.0
 GDAL==3.0.4
 scipy==1.5.3
-sklearn
 pyproj==3.0.1
+#sklearn
 #statsmodel
