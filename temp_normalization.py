@@ -464,8 +464,8 @@ def AZMget(JSON_df):
 
         temp_df = retrieve_splines(date_of_interest)
 
-    temp_df["Hour"] = temp_df["date"].dt.hour
-    temp_df["Minute"] = temp_df["date"].dt.minute
+#     temp_df["Hour"] = temp_df["date"].dt.hour
+#     temp_df["Minute"] = temp_df["date"].dt.minute
 
     EnvLog = EnvLog.set_index("Time")
     EnvLog = EnvLog.reset_index() 
