@@ -389,6 +389,7 @@ def splines(
     finer_df["Year"] = year[0]
     finer_df["date"] = date[0]
 
+    finer_df["date"] = pd.to_datetime(finer_df['date']).dt.date
     finer_df["Hour"] = pd.to_timedelta(finer_df["Hour"], unit="h")
     finer_df["Minute"] = pd.to_timedelta(finer_df["Minute"], unit="m")
 
