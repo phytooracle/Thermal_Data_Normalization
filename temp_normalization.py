@@ -471,6 +471,7 @@ def AZMget(JSON_df):
     EnvLog = EnvLog.reset_index() 
 
     date_of_interest = temp_df
+    date_of_interest['date'] = pd.to_datetime(date_of_interest['date']) + date_of_interest['Hour'] + date_of_interest['Minute']
     print("* * AZmet Date of Interest Gathered * *")
 
     print("* * Environment Logger Date of Interest Gathered * *")
